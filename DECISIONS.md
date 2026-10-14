@@ -1,0 +1,7 @@
+# DECISIONS.md
+
+1. **Indexes.** `employees`: unique `emp_code` (identity), `(department, emp_code)` (filtered list), `(department, joined_on)` and `(joined_on)` (headcount in the department pipelines). `attendance_logs`: unique `(emp_code, date)` (one record per day, employee lookups), `(date, emp_code)` (list sort, month scans), `(status, date, emp_code)` (status filter), `(emp_code, punch_in)` (punch-out lookup). Rejected: a separate `date` index, because the compound index already covers it and extra indexes slow writes.
+2. **Punch-in race.** Both requests compute the same `(emp_code, date)` and call `insert_one`. The unique index lets MongoDB accept one; the other gets `DuplicateKeyError`, which I return as 409. There is no check-then-insert.
+3. **Ties.** I rank with `$setWindowFields` + `$rank` (1, 2, 2, 4) and apply `limit` afterwards as `rank <= limit`. Employees tied at the cutoff all stay, so the list can be longer than `limit`.
+4. **Headcount.** The summary starts from `employees` (`joined_on` <= month end) and `$lookup`s the logs. No logs gives an empty array, and the employee is still counted.
+5. **100x data.** Stop aggregating raw logs per request: keep pre-computed daily/monthly totals, and use cursor-based paging instead of `skip`.
